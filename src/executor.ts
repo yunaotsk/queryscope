@@ -1,4 +1,4 @@
-import type { Counters, OperatorStats, Plan, Row, Table } from "./types";
+import type { Counters, OperatorStats, Plan, Row, Table, Value } from "./types";
 
 export type Database = Record<string, Table>;
 
@@ -25,10 +25,37 @@ export function scan(plan: Extract<Plan, { type: "Scan" }>, db: Database): ExecR
   return { rows, counters: { operator: "Scan", counters, children: [] } };
 }
 
+export function filter(plan: Extract<Plan, { type: "Filter" }>, db: Database): ExecResult {
+  const child = execute(plan.input, db);
+  const counters = zeroCounters();
+  const rows: Row[] = [];
+  for (const row of child.rows) {
+    const v = row[plan.column];
+    if (v === undefined) throw new Error(`Unknown column: ${plan.column}`);
+    counters.comparisons++; // one predicate evaluation per input row
+    if (compare(v, plan.op, plan.value)) rows.push(row);
+  }
+  counters.rowsProduced = rows.length;
+  return { rows, counters: { operator: "Filter", counters, children: [child.counters] } };
+}
+
+function compare(a: Value, op: Extract<Plan, { type: "Filter" }>["op"], b: Value): boolean {
+  switch (op) {
+    case "=": return a === b;
+    case "!=": return a !== b;
+    case "<": return a < b;
+    case "<=": return a <= b;
+    case ">": return a > b;
+    case ">=": return a >= b;
+  }
+}
+
 export function execute(plan: Plan, db: Database): ExecResult {
   switch (plan.type) {
     case "Scan":
       return scan(plan, db);
+    case "Filter":
+      return filter(plan, db);
     default:
       throw new Error(`${plan.type} not implemented yet`);
   }
