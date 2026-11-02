@@ -86,3 +86,37 @@ describe("Filter", () => {
     ).toThrow(/Unknown column/);
   });
 });
+
+describe("Project", () => {
+  const scanUsers = { type: "Scan", table: "users" } as const;
+
+  it("keeps only the requested columns and preserves duplicates", () => {
+    const r = execute({ type: "Project", input: scanUsers, columns: ["users.id"] }, db);
+    expect(r.rows).toEqual([{ "users.id": 1 }, { "users.id": 2 }, { "users.id": 2 }]);
+    expect(r.counters.operator).toBe("Project");
+    expect(r.counters.counters).toEqual({
+      rowsScanned: 0, comparisons: 0, hashBuilds: 0, hashProbes: 0, rowsProduced: 3,
+    });
+    expect(r.counters.children[0]!.operator).toBe("Scan");
+  });
+
+  it("can reorder columns", () => {
+    const r = execute({ type: "Project", input: scanUsers, columns: ["users.name", "users.id"] }, db);
+    expect(Object.keys(r.rows[0]!)).toEqual(["users.name", "users.id"]);
+  });
+
+  it("handles empty input", () => {
+    const r = execute({ type: "Project", input: { type: "Scan", table: "empty" }, columns: ["empty.x"] }, db);
+    expect(r.rows).toEqual([]);
+    expect(r.counters.counters.rowsProduced).toBe(0);
+  });
+
+  it("does not mutate the input rows", () => {
+    execute({ type: "Project", input: scanUsers, columns: ["users.id"] }, db);
+    expect(db.users!.rows[0]).toEqual({ "users.id": 1, "users.name": "ann" });
+  });
+
+  it("throws on an unknown column", () => {
+    expect(() => execute({ type: "Project", input: scanUsers, columns: ["users.zzz"] }, db)).toThrow(/Unknown column/);
+  });
+});

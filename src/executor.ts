@@ -39,6 +39,22 @@ export function filter(plan: Extract<Plan, { type: "Filter" }>, db: Database): E
   return { rows, counters: { operator: "Filter", counters, children: [child.counters] } };
 }
 
+export function project(plan: Extract<Plan, { type: "Project" }>, db: Database): ExecResult {
+  const child = execute(plan.input, db);
+  const counters = zeroCounters();
+  const rows: Row[] = child.rows.map((row) => {
+    const out: Row = {};
+    for (const col of plan.columns) {
+      const v = row[col];
+      if (v === undefined) throw new Error(`Unknown column: ${col}`);
+      out[col] = v;
+    }
+    return out;
+  });
+  counters.rowsProduced = rows.length; // no DISTINCT: duplicates are kept
+  return { rows, counters: { operator: "Project", counters, children: [child.counters] } };
+}
+
 function compare(a: Value, op: Extract<Plan, { type: "Filter" }>["op"], b: Value): boolean {
   switch (op) {
     case "=": return a === b;
@@ -56,6 +72,8 @@ export function execute(plan: Plan, db: Database): ExecResult {
       return scan(plan, db);
     case "Filter":
       return filter(plan, db);
+    case "Project":
+      return project(plan, db);
     default:
       throw new Error(`${plan.type} not implemented yet`);
   }
